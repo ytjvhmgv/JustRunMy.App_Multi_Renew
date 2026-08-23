@@ -388,38 +388,62 @@ def form_login(sb) -> bool:
 # ============================================================
 #  续期操作模块 (多策略容错定位)
 # ============================================================
+def is_dialog_open(sb) -> bool:
+    """检查是否已经打开了续期确认弹窗"""
+    try:
+        return sb.execute_script("""
+            var bodyText = document.body.innerText || "";
+            if (bodyText.includes("Tired of resetting this timer") || bodyText.includes("Just Reset")) {
+                return true;
+            }
+            return false;
+        """)
+    except Exception:
+        return False
+
 def find_and_click_reset_entry(sb) -> bool:
     """多策略智能定位并点击主界面的 Reset timer 按钮"""
     print("正在定位并打开续期弹窗...")
+    
+    # 如果当前页面已经直接弹出了续期确认框，则直接返回成功
+    if is_dialog_open(sb):
+        print("✅ 检测到续期弹窗已处于开启状态，直接进入确认步骤。")
+        return True
+
     start_time = time.time()
-    max_wait = 25
+    max_wait = 20
 
     js_find_and_click = """
     (function() {
-        var buttons = Array.from(document.querySelectorAll('button, a'));
-        // 1. 文本/属性完全匹配
+        var buttons = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
+        
+        // 1. 精确匹配主界面上的 Reset/续期入口按钮
         for (var btn of buttons) {
             var text = (btn.innerText || btn.textContent || "").toLowerCase().trim();
             var aria = (btn.getAttribute('aria-label') || "").toLowerCase().trim();
             var title = (btn.getAttribute('title') || "").toLowerCase().trim();
-            var cls = (btn.className || "").toLowerCase();
             
-            if (text.includes("reset timer") || aria.includes("reset timer") || title.includes("reset timer")) {
+            // 排除弹窗内部的确认按钮
+            if (text === "just reset" || text === "add credits") continue;
+
+            if (text.includes("reset") || aria.includes("reset") || title.includes("reset")) {
                 btn.click();
-                return "text_or_aria_match";
+                return "text_reset_match: " + text;
             }
-            if (btn.querySelector('.bi-arrow-clockwise') && (cls.includes('amber') || cls.includes('orange') || text.includes('reset'))) {
+            if (btn.querySelector('svg, i') && (text.includes('reset') || text.includes('renew'))) {
                 btn.click();
-                return "icon_match";
+                return "icon_with_text_match";
             }
         }
-        // 2. 备用：包含 Reset 且带有橙黄色高亮
+        
+        // 2. 根据图标类名 (bi-arrow-clockwise 或 svg 循环刷新图标) 定位
         for (var btn of buttons) {
-            var text = (btn.innerText || btn.textContent || "").toLowerCase().trim();
-            var cls = (btn.className || "").toLowerCase();
-            if (text.includes("reset") && !text.includes("just reset") && (cls.includes('amber') || cls.includes('orange') || cls.includes('yellow'))) {
-                btn.click();
-                return "color_reset_match";
+            if (btn.querySelector('.bi-arrow-clockwise') || btn.querySelector('svg')) {
+                var cls = (btn.className || "").toLowerCase();
+                if (cls.includes('amber') || cls.includes('orange') || cls.includes('yellow') || cls.includes('emerald') || cls.includes('btn')) {
+                    btn.click();
+                    return "icon_class_match";
+                }
             }
         }
         return null;
@@ -427,29 +451,35 @@ def find_and_click_reset_entry(sb) -> bool:
     """
 
     while time.time() - start_time < max_wait:
+        if is_dialog_open(sb):
+            print("✅ 弹窗已展开！")
+            return True
+
         try:
             res = sb.execute_script(js_find_and_click)
             if res:
-                print(f"✅ 成功触发 Reset timer 按钮 (方式: {res})")
+                print(f"✅ 成功触发 Reset 入口按钮 (方式: {res})")
+                time.sleep(2)
                 return True
         except Exception:
             pass
 
         selectors = [
-            'button[aria-label*="Reset timer" i]',
-            'button[title*="Reset timer" i]',
-            'button:contains("Reset timer")',
+            'button:contains("Reset")',
+            'button[aria-label*="Reset" i]',
+            'button[title*="Reset" i]',
             'button.bg-amber-500',
             'button.bg-amber-600',
             'button.bg-orange-500',
-            '//button[contains(., "Reset timer")]',
+            '//button[contains(., "Reset") and not(contains(., "Just"))]',
             '//button[.//i[contains(@class, "bi-arrow-clockwise")]]'
         ]
         for sel in selectors:
             try:
                 if sb.is_element_visible(sel):
                     sb.click(sel)
-                    print(f"✅ 成功点击 Reset timer 按钮 (选择器: {sel})")
+                    print(f"✅ 成功点击 Reset 按钮 (选择器: {sel})")
+                    time.sleep(2)
                     return True
             except Exception:
                 continue
@@ -459,27 +489,16 @@ def find_and_click_reset_entry(sb) -> bool:
     return False
 
 def click_just_reset_button(sb) -> bool:
+    """定位并点击弹窗内的 Just Reset 按钮"""
     print("正在定位并点击 Just Reset 确认按钮...")
-    selectors = [
-        'button:contains("Just Reset")',
-        '//button[contains(., "Just Reset")]',
-        'div.fixed button:contains("Just Reset")',
-        'button.border-slate-200'
-    ]
-    for sel in selectors:
-        try:
-            if sb.is_element_visible(sel):
-                sb.click(sel)
-                print(f"成功点击 Just Reset (选择器: {sel})")
-                return True
-        except Exception:
-            continue
-
+    
+    # 优先执行 JS 精准查找与点击
     try:
         clicked = sb.execute_script("""
-            var buttons = document.querySelectorAll('button');
+            var buttons = Array.from(document.querySelectorAll('button, a'));
             for (var btn of buttons) {
-                if (btn.textContent && btn.textContent.includes('Just Reset')) {
+                var txt = (btn.innerText || btn.textContent || "").trim();
+                if (txt === "Just Reset" || txt.toLowerCase().includes("just reset")) {
                     btn.click();
                     return true;
                 }
@@ -487,10 +506,27 @@ def click_just_reset_button(sb) -> bool:
             return false;
         """)
         if clicked:
-            print("通过 JS 成功点击 Just Reset 按钮！")
+            print("✅ 通过 JS 成功点击 Just Reset 按钮！")
             return True
     except Exception as e:
-        print(f"JS 点击 Just Reset 异常: {e}")
+        print(f"JS 尝试点击异常: {e}")
+
+    selectors = [
+        'button:contains("Just Reset")',
+        '//button[contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "just reset")]',
+        'div.fixed button:contains("Just Reset")',
+        'div[role="dialog"] button:contains("Just Reset")',
+        'button.border-slate-200',
+        '//button[contains(., "Reset")]'
+    ]
+    for sel in selectors:
+        try:
+            if sb.is_element_visible(sel):
+                sb.click(sel)
+                print(f"✅ 成功点击确认按钮 (选择器: {sel})")
+                return True
+        except Exception:
+            continue
 
     return False
 
@@ -500,13 +536,12 @@ def renew(sb) -> bool:
     print("   开始自动续期流程")
     print("=" * 50)
     
-    # 避免重复刷新当前页面
     if "56317" not in sb.get_current_url().lower():
         print(f"进入应用详情页: {APP_URL}")
         sb.open(APP_URL)
         time.sleep(6)
 
-    # 1. 查找并点击 Reset timer 按钮
+    # 1. 查找并点击 Reset timer 按钮（或直接判断弹窗）
     if not find_and_click_reset_entry(sb):
         print("无法定位到 Reset timer 按钮")
         sb.save_screenshot("renew_reset_btn_not_found.png")
@@ -514,7 +549,7 @@ def renew(sb) -> bool:
         return False
 
     # 2. 等待弹窗与 Turnstile 验证
-    print("检查续期弹窗...")
+    print("检查续期弹窗与人机验证...")
     time.sleep(2)
     if sb.execute_script(_EXISTS_JS):
         print("检测到弹窗内包含 Cloudflare Turnstile 验证框，开始验证...")
