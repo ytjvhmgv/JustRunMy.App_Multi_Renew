@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # 每天北京时间 06:00 (UTC 22:00) 触发
-    - cron: '0 13 * * *'
+    - cron: '0 22 * * *'
 
 permissions:
   contents: read
@@ -21,92 +21,92 @@ jobs:
         account_index: [1]
 
     steps:
-    - name: 📥 下载代码
-      uses: actions/checkout@v4
+      - name: 📥 下载代码
+        uses: actions/checkout@v4
 
-    - name: 🐍 设置 Python 环境
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: 🐍 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: ⏳ 随机延迟防关联 (仅定时触发执行)
-      if: github.event_name == 'schedule'
-      run: |
-        DELAY=$(( RANDOM % 3600 + 600 ))
-        echo "随机等待 ${DELAY}s 后开始执行..."
-        sleep $DELAY
+      - name: ⏳ 随机延迟防关联 (仅定时触发执行)
+        if: github.event_name == 'schedule'
+        run: |
+          DELAY=$(( RANDOM % 3600 + 600 ))
+          echo "随机等待 ${DELAY}s 后开始执行..."
+          sleep $DELAY
 
-    - name: 🛡️ 启动 sing-box 代理
-      env:
-        PROXY_URL: ${{ secrets.PROXY_URL }}
-      run: |
-        if [ -z "$PROXY_URL" ]; then
-          echo "⚠️ 未设置 PROXY_URL，将尝试直连。"
-          exit 0
-        fi
+      - name: 🛡️ 启动 sing-box 代理
+        env:
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: |
+          if [ -z "$PROXY_URL" ]; then
+            echo "⚠️ 未设置 PROXY_URL，将尝试直连。"
+            exit 0
+          fi
 
-        SINGBOX_VER="1.13.14"
-        wget -q "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VER}/sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
-        tar -xzf "sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
-        mv "sing-box-${SINGBOX_VER}-linux-amd64/sing-box" ./sing-box
-        chmod +x ./sing-box
+          SINGBOX_VER="1.13.14"
+          wget -q "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VER}/sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
+          tar -xzf "sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
+          mv "sing-box-${SINGBOX_VER}-linux-amd64/sing-box" ./sing-box
+          chmod +x ./sing-box
 
-        python proxy_handler.py
-        nohup ./sing-box run -c config.json > singbox.log 2>&1 &
-        sleep 5
+          python proxy_handler.py
+          nohup ./sing-box run -c config.json > singbox.log 2>&1 &
+          sleep 5
 
-        export http_proxy=http://127.0.0.1:8080
-        export https_proxy=http://127.0.0.1:8080
-        curl -s --connect-timeout 10 https://api.ipify.org || echo "无法获取出口 IP"
+          export http_proxy=http://127.0.0.1:8080
+          export https_proxy=http://127.0.0.1:8080
+          curl -s --connect-timeout 10 https://api.ipify.org || echo "无法获取出口 IP"
 
-    - name: 🛠️ 安装自动化依赖
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb x11-utils xdotool fonts-noto-cjk
-        pip install seleniumbase requests
-        seleniumbase install chromedriver
+      - name: 🛠️ 安装自动化依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils xdotool fonts-noto-cjk
+          pip install seleniumbase requests
+          seleniumbase install chromedriver
 
-    - name: 🚀 运行账号 ${{ matrix.account_index }} 续期
-      env:
-        ACC: ${{ secrets[format('EML_{0}', matrix.account_index)] }}
-        ACC_PWD: ${{ secrets[format('PWD_{0}', matrix.account_index)] }}
-        COOKIE: ${{ secrets[format('COOKIE_{0}', matrix.account_index)] }}
-        ACC_INDEX: ${{ matrix.account_index }}
-        GH_PAT: ${{ secrets.GH_PAT }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        TG_TOKEN: ${{ secrets.TG_TOKEN }}
-        TG_ID: ${{ secrets.TG_ID }}
-        PROXY_URL: ${{ secrets.PROXY_URL }}
-      run: |
-        echo "开始处理账号索引: ${{ matrix.account_index }}"
-        xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-          python reset_timer.py
+      - name: 🚀 运行账号 ${{ matrix.account_index }} 续期
+        env:
+          ACC: ${{ secrets[format('EML_{0}', matrix.account_index)] }}
+          ACC_PWD: ${{ secrets[format('PWD_{0}', matrix.account_index)] }}
+          COOKIE: ${{ secrets[format('COOKIE_{0}', matrix.account_index)] }}
+          ACC_INDEX: ${{ matrix.account_index }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_ID: ${{ secrets.TG_ID }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: |
+          echo "开始处理账号索引: ${{ matrix.account_index }}"
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
+            python reset_timer.py
 
-    - name: 📸 错误截图上传
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: debug-acc-${{ matrix.account_index }}
-        path: "*.png"
-        retention-days: 1
+      - name: 📸 错误截图上传
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-acc-${{ matrix.account_index }}
+          path: "*.png"
+          retention-days: 1
 
-    - name: 🧹 清理代理与后台进程
-      if: always()
-      run: |
-        echo "正在终止 sing-box、浏览器及虚拟显示器进程..."
-        pkill -f "sing-box" || true
-        pkill -f "chrome" || true
-        pkill -f "chromedriver" || true
-        pkill -f "Xvfb" || true
+      - name: 🧹 清理代理与后台进程
+        if: always()
+        run: |
+          echo "正在终止 sing-box、浏览器及虚拟显示器进程..."
+          pkill -f "sing-box" || true
+          pkill -f "chrome" || true
+          pkill -f "chromedriver" || true
+          pkill -f "Xvfb" || true
 
-    - name: 🗑️ 清理历史工作流记录 (仅保留最近 1 条)
-      if: always()
-      env:
-        GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-      run: |
-        echo "正在清理历史工作流记录..."
-        OLD_RUNS=$(gh run list --workflow "renew.yml" --limit 50 --json databaseId --jq '.[1:][].databaseId' || true)
-        for RUN_ID in $OLD_RUNS; do
-          echo "删除旧运行记录 ID: $RUN_ID"
-          gh run delete "$RUN_ID" || true
-        done
+      - name: 🗑️ 清理历史工作流记录 (仅保留最近 1 条)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "正在清理历史工作流记录..."
+          OLD_RUNS=$(gh run list --workflow "${{ github.workflow }}" --limit 50 --json databaseId --jq '.[1:][].databaseId' || true)
+          for RUN_ID in $OLD_RUNS; do
+            echo "删除旧运行记录 ID: $RUN_ID"
+            gh run delete "$RUN_ID" || true
+          done
