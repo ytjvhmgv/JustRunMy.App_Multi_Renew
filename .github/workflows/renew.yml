@@ -36,28 +36,53 @@ jobs:
           echo "随机等待 ${DELAY}s 后开始执行..."
           sleep $DELAY
 
-      - name: 🛡️ 启动 sing-box 代理
+      - name: 🛡️ 启动 Xray 代理 (v25.3.6)
         env:
           PROXY_URL: ${{ secrets.PROXY_URL }}
         run: |
-          if [ -z "$PROXY_URL" ]; then
+          set -euo pipefail
+          if [ -z "${PROXY_URL:-}" ]; then
             echo "⚠️ 未设置 PROXY_URL，将尝试直连。"
             exit 0
           fi
 
-          SINGBOX_VER="1.13.14"
-          wget -q "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VER}/sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
-          tar -xzf "sing-box-${SINGBOX_VER}-linux-amd64.tar.gz"
-          mv "sing-box-${SINGBOX_VER}-linux-amd64/sing-box" ./sing-box
-          chmod +x ./sing-box
+          XRAY_VER="25.3.6"
+          echo "正在安装 Xray-core v${XRAY_VER}..."
+          curl -fL --retry 3 --retry-delay 2 -o Xray-linux-64.zip \
+            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VER}/Xray-linux-64.zip"
+          unzip -o Xray-linux-64.zip xray
+          chmod +x ./xray
+          ./xray version
 
           python proxy_handler.py
-          nohup ./sing-box run -c config.json > singbox.log 2>&1 &
-          sleep 5
 
-          export http_proxy=http://127.0.0.1:8080
-          export https_proxy=http://127.0.0.1:8080
-          curl -s --connect-timeout 10 https://api.ipify.org || echo "无法获取出口 IP"
+          nohup ./xray run -c config.json > xray.log 2>&1 &
+          python - <<'PY'
+          import socket, sys, time
+          for _ in range(20):
+              s = socket.socket()
+              s.settimeout(1)
+              try:
+                  s.connect(("127.0.0.1", 8080))
+                  s.close()
+                  print("✅ Xray HTTP 入站已监听 127.0.0.1:8080")
+                  sys.exit(0)
+              except OSError:
+                  time.sleep(0.5)
+          print("❌ Xray 未能监听 8080")
+          sys.exit(1)
+          PY
+
+          echo "🔍 验证代理出口..."
+          if curl -sS --proxy http://127.0.0.1:8080 --connect-timeout 15 --max-time 25 https://api.ipify.org; then
+            echo ""
+            echo "✅ 代理出口检测成功"
+          else
+            echo ""
+            echo "❌ 代理出口检测失败，Xray 日志如下："
+            cat xray.log || true
+            exit 1
+          fi
 
       - name: 🛠️ 安装自动化依赖
         run: |
@@ -90,15 +115,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-acc-${{ matrix.account_index }}
-          path: "*.png"
+          path: |
+            *.png
+            xray.log
           if-no-files-found: ignore
           retention-days: 1
 
       - name: 🧹 清理代理与后台进程
         if: always()
         run: |
-          echo "正在终止 sing-box、浏览器及虚拟显示器进程..."
-          pkill -f "sing-box" || true
+          echo "正在终止 xray、浏览器及虚拟显示器进程..."
+          pkill -f "xray run" || true
+          pkill -x xray || true
           pkill -f "chrome" || true
           pkill -f "chromedriver" || true
           pkill -f "Xvfb" || true
