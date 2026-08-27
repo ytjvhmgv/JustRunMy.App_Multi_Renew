@@ -783,9 +783,17 @@ def main():
         print("浏览器已启动")
         try:
             sb.open("https://api.ipify.org/?format=json")
-            print(f"当前出口 IP: {sb.get_text('body')}")
-        except Exception:
-            pass
+            ip_text = (sb.get_text("body") or "").strip()
+            print(f"当前出口 IP: {ip_text}")
+            lowered = ip_text.lower()
+            if any(token in lowered for token in ("err_", "can't be reached", "can’t be reached", "connection was reset", "this site can't be reached")):
+                print("代理出口不可用，终止执行。请查看 Actions 里的 xray.log。")
+                sb.save_screenshot("proxy_ip_fail.png")
+                raise SystemExit(1)
+        except SystemExit:
+            raise
+        except Exception as e:
+            print(f"出口 IP 检测异常: {e}")
 
         if try_cookie_login(sb) or form_login(sb):
             success = bool(renew(sb))
