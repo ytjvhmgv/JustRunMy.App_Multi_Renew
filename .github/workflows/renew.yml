@@ -32,7 +32,7 @@ jobs:
       - name: ⏳ 随机延迟防关联 (仅定时触发执行)
         if: github.event_name == 'schedule'
         run: |
-          DELAY=$(( RANDOM % 3600 + 600 ))
+          DELAY=$(( RANDOM % 300 + 1 ))
           echo "随机等待 ${DELAY}s 后开始执行..."
           sleep $DELAY
 
